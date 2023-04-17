@@ -1,5 +1,5 @@
 from django.http import JsonResponse
-from djangobase.models import Collection, Website
+from djangobase.models import Collection, CollectionGroup, Website
 
 
 def api_get_collection(request, slug):
@@ -8,6 +8,14 @@ def api_get_collection(request, slug):
     )
 
     return collection.to_data()
+
+
+def api_get_collection_group(request, slug):
+    collection_group = CollectionGroup.objects.get(
+        slug=slug
+    )
+
+    return collection_group.to_data()
 
 
 def api_get_collections(request):
@@ -20,6 +28,20 @@ def api_get_collections(request):
           collection
           in
           collections
+       ])
+    )
+
+
+def api_get_collection_groups(request):
+    collection_groups = CollectionGroup.objects.order_by('name').all()
+
+    return JsonResponse(
+       dict(objects=[
+          collection_group.to_data()
+          for
+          collection_group
+          in
+          collection_groups
        ])
     )
 
@@ -39,6 +61,24 @@ def api_get_collections_for_site(request, slug):
           collections
        ])
     )
+
+
+def api_get_collection_groups_for_site(request, slug):
+    site = Website.objects.get(
+        slug=slug
+    )
+    collection_groups = CollectionGroup.objects.order_by('name').all()
+
+    return JsonResponse(
+       dict(objects=[
+          collection_group.to_data()
+          for
+          collection_group
+          in
+          collection_groups
+       ])
+    )
+
 
 def api_get_sites(request):
     domain = request.GET.get('domain', None)

@@ -6,9 +6,9 @@ from django.http import HttpRequest, QueryDict
 
 from django.utils.module_loading import import_string
 import graphene
-from djangobase.models import Collection, ColumnGroup, DjangoForm
+from djangobase.models import Collection, ColumnGroup, DjangobaseForm
 
-from djangobase.models import generic_user_get, generic_user_query
+from djangobase.models import generic_get, generic_query, generic_user_get, generic_user_query, resolve_node_type
 
 from graphene_django import DjangoObjectType
 
@@ -131,9 +131,9 @@ class DjangobaseCollectionNode(DjangoObjectType):
         )
         
         return DjangobaseDocumentNode(
-            data=node.to_data(),
-            id=node.id,
-            slug=node.slug,
+            data=node.to_data() if node else None,
+            id=node.id if node else None,
+            slug=node.slug if node else None,
             collection=self
         )
 
@@ -155,7 +155,7 @@ class DjangobaseFormField(graphene.ObjectType):
 
 class DjangobaseFormEntity(DjangoObjectType):
     class Meta:
-        model = DjangoForm
+        model = DjangobaseForm
         fields = ['name', 'slug', 'id']
     
     fields = graphene.List(
@@ -192,6 +192,9 @@ class SubmitDjangoFormMutation(graphene.Mutation):
     status = graphene.Field(graphene.Int)
 
     def mutate(self, info, form_id, data, slug = None):
+        if not info.context.user.is_authenticated:
+            raise Exception("Not authenticated")
+
         django_form = DjangoForm.objects.get(
             slug=form_id
         )
@@ -214,6 +217,47 @@ class SubmitDjangoFormMutation(graphene.Mutation):
         )
 
 
+class DjangobaseDeleteDocumentsMutation(graphene.Mutation):
+    class Arguments:
+        collection_id = graphene.String(required=True)
+        slug = graphene.String(required=False)
+        slugs = graphene.List(graphene.String, required=False)
+
+    deleted = graphene.Field(graphene.Boolean)
+
+    def mutate(self, info, collection_id, slug = None, slugs = None):
+        if not info.context.user.is_authenticated:
+            raise Exception("Not authenticated")
+        
+        if slug:
+            slugs = [slug]
+
+        collection = Collection.objects.get(
+            slug=collection_id
+        )
+
+        model = import_string(collection.model)
+
+        if not model:
+            raise Exception(f"Invalid {collection.model}")
+        
+        for slug in slugs:
+            node = generic_user_get(
+                model,
+                slug,
+                info.context.user
+            )
+            if not node:
+                raise Exception("Error")
+
+            if info.context.user.is_superuser:
+                node.delete()
+
+        return DjangobaseDeleteDocumentsMutation(
+           deleted=True
+        )
+            
+
 class DjangobaseQuery(graphene.ObjectType):
     collections = graphene.List(
         'djangobase.schema.DjangobaseCollectionNode'
@@ -232,7 +276,7 @@ class DjangobaseQuery(graphene.ObjectType):
         )
 
 
-class UpsertDjangobaseDocumentMutation(graphene.Mutation):
+class DjangobaseUpsertDocumentMutation(graphene.Mutation):
     class Arguments:
         slug = graphene.String(required=True)
         collection_id = graphene.String(required=True)
@@ -274,7 +318,7 @@ class UpsertDjangobaseDocumentMutation(graphene.Mutation):
             if hasattr(node, 'user'):
                 node.user = info.context.user
                 node.save()
-        return UpsertDjangobaseDocumentMutation(
+        return DjangobaseUpsertDocumentMutation(
             document=DjangobaseDocumentNode(
                 data=node.to_data(),
                 id=node.id,
@@ -285,7 +329,7 @@ class UpsertDjangobaseDocumentMutation(graphene.Mutation):
 
 
 class DjangobaseMutation(graphene.ObjectType):
-    upsert_document = UpsertDjangobaseDocumentMutation.Field()
-
+    upsert_document = DjangobaseUpsertDocumentMutation.Field()
+    delete_documents = DjangobaseDeleteDocumentsMutation.Field()
 
 schema = graphene.Schema(query=DjangobaseQuery, mutation=DjangobaseMutation)
